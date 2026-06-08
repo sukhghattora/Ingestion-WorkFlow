@@ -1,0 +1,482 @@
+{
+  "name": "Ingestion Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "SimpleJyotish — Upload Client Chart",
+        "formDescription": "Upload the Horosoft 5.0 PDF. All chart data is extracted automatically and saved to Airtable.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Client WhatsApp Number",
+              "placeholder": "+1 306 850 4260  (must match their registration)",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Client Name",
+              "placeholder": "e.g. Sukhdeep Singh",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Subscription Plan",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Monthly"
+                  },
+                  {
+                    "option": "Premium"
+                  },
+                  {
+                    "option": "Free"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Language Preference",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "English"
+                  },
+                  {
+                    "option": "Hindi"
+                  },
+                  {
+                    "option": "Punjabi"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Horosoft PDF Chart",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e2320699-e795-49c0-93b8-c95259f93ab0",
+      "name": "Form — Upload Chart",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -1120,
+        96
+      ],
+      "webhookId": "a5cd9f5f-dea4-41f9-bb05-82e5725bc14d"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "65b322e0-9ecf-4d06-917c-e001f8960a4a",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -896,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "40991c83-eab7-4d61-8c6f-d1a06b4125b6",
+      "name": "Claude — Parse Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -672,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst formData  = $('Form — Upload Chart').item.json;\nconst response  = $('Claude — Parse Chart').item.json;\nconst rawText   = response?.content?.[0]?.text || response?.choices?.[0]?.message?.content || '';\n\nconst whatsappNum  = String(formData['Client WhatsApp Number'] || '').trim();\nconst clientName   = String(formData['Client Name']           || '').trim();\nconst subPlan      = formData['Subscription Plan']            || 'Monthly';\nconst langPref     = formData['Language Preference']          || 'English';\n\n// Clean JSON — strip markdown fences\nconst cleaned = rawText.replace(/```json/gi,'').replace(/```/g,'').trim();\n\nlet parsed = {}, parseError = false;\ntry { parsed = JSON.parse(cleaned); }\ncatch(e) { parseError = true; }\n\nif (parseError) {\n  return [{json:{\n    parseError: true, whatsappNum, clientName, subPlan, langPref,\n    rawResponse: rawText\n  }}];\n}\n\nconst af  = parsed.airtable_fields || {};\nconst s   = (k) => (af[k] != null && af[k] !== '') ? String(af[k]) : '';\n\n// Convert DD/MM/YYYY → YYYY-MM-DD for Airtable date fields\nfunction toISODate(ddmmyyyy) {\n  if (!ddmmyyyy) return null;\n  const m = String(ddmmyyyy).match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);\n  if (!m) return null;\n  return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;\n}\n\nconst dobISO = toISODate(s('Date of Birth'));\n\nconsole.log(`[Ingestion] Client: ${clientName} | WhatsApp: ${whatsappNum} | DOB: ${s('Date of Birth')} → ${dobISO}`);\nconsole.log(`[Ingestion] Dasha Balance: ${s('Balance of Dasha At Birth')}`);\nconsole.log(`[Ingestion] Current MD: ${s('Current Mahadasha')}`);\nconsole.log(`[Ingestion] Warnings: ${JSON.stringify(parsed.extraction_warnings || [])}`);\n\nreturn [{json:{\n  parseError: false,\n  whatsappNum, clientName, subPlan, langPref,\n  dobISO,\n  warnings: parsed.extraction_warnings || [],\n  // All Airtable field values\n  'Date of Birth':              dobISO,\n  'Time of Birth':              s('Time of Birth'),\n  'Place of Birth':             s('Place of Birth'),\n  'Lagna':                      s('Lagna'),\n  'Lagna Lord':                 s('Lagna Lord'),\n  'Rashi':                      s('Rashi'),\n  'Nakshatra':                  s('Nakshatra'),\n  'Nakshatra Pada':             s('Nakshatra Pada'),\n  'Nakshatra Lord':             s('Nakshatra Lord'),\n  'Gan':                        s('Gan'),\n  'Nadi':                       s('Nadi'),\n  'Yoga Name':                  s('Yoga Name'),\n  'Paya':                       s('Paya'),\n  'Manglik':                    s('Manglik'),\n  'Lucky Day':                  s('Lucky Day'),\n  'Lucky Color':                s('Lucky Color'),\n  'Lucky Stone':                s('Lucky Stone'),\n  'Lucky Number':               s('Lucky Number'),\n  'Life Stone':                 s('Life Stone'),\n  'Benefic Stone':              s('Benefic Stone'),\n  'Planetary Positions':        s('Planetary Positions'),\n  'Yogas Doshas':               s('Yogas Doshas'),\n  'Sadesati Details':           s('Sadesati Details'),\n  'Balance of Dasha At Birth':  s('Balance of Dasha At Birth'),\n  'Current Mahadasha':          s('Current Mahadasha'),\n  'Current Antardasha':         s('Current Antardasha'),\n  'Next Mahadasha':             s('Next Mahadasha'),\n  'Vimshottari Dasha Timeline': s('Vimshottari Dasha Timeline'),\n  'Current Dasha Prediction':   s('Current Dasha Prediction'),\n  'Annual Prediction':          s('Annual Prediction'),\n  'Personality Analysis':       s('Personality Analysis'),\n  'Career Prediction':          s('Career Prediction'),\n  'Health Notes':               s('Health Notes'),\n  'Marriage Notes':             s('Marriage Notes'),\n  'Lalkitab Remedies':          s('Lalkitab Remedies'),\n  'Ancestral Debts':            s('Ancestral Debts'),\n  kundli_json: JSON.stringify(parsed, null, 2)\n}}];\n"
+      },
+      "id": "4fe1564f-767e-497c-8d26-39b3f53f0b46",
+      "name": "Parse & Map Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        96
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "no-error",
+              "leftValue": "={{ $json.parseError }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5761f666-4708-49b5-ad04-168dfbbd4a33",
+      "name": "Parsed OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://airtable.com/app8rIssogn1xAjJK/tblKpuWqZ4PSSKLe6"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "tblKpuWqZ4PSSKLe6",
+          "cachedResultName": "Clients"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "WhatsApp Number": "={{ $('Parse & Map Fields').item.json.whatsappNum }}",
+            "Client Name": "={{ $('Parse & Map Fields').item.json.clientName }}",
+            "Subscription Plan": "={{ $('Parse & Map Fields').item.json.subPlan }}",
+            "Language Preference": "={{ $('Parse & Map Fields').item.json.langPref }}",
+            "Date of Birth": "={{ $('Parse & Map Fields').item.json['Date of Birth'] }}",
+            "Time of Birth": "={{ $('Parse & Map Fields').item.json['Time of Birth'] }}",
+            "Place of Birth": "={{ $('Parse & Map Fields').item.json['Place of Birth'] }}",
+            "Lagna": "={{ $('Parse & Map Fields').item.json['Lagna'] }}",
+            "Lagna Lord": "={{ $('Parse & Map Fields').item.json['Lagna Lord'] }}",
+            "Rashi": "={{ $('Parse & Map Fields').item.json['Rashi'] }}",
+            "Nakshatra": "={{ $('Parse & Map Fields').item.json['Nakshatra'] }}",
+            "Nakshatra Pada": "={{ $('Parse & Map Fields').item.json['Nakshatra Pada'] }}",
+            "Nakshatra Lord": "={{ $('Parse & Map Fields').item.json['Nakshatra Lord'] }}",
+            "Gan": "={{ $('Parse & Map Fields').item.json['Gan'] }}",
+            "Nadi": "={{ $('Parse & Map Fields').item.json['Nadi'] }}",
+            "Yoga Name": "={{ $('Parse & Map Fields').item.json['Yoga Name'] }}",
+            "Paya": "={{ $('Parse & Map Fields').item.json['Paya'] }}",
+            "Manglik": "={{ $('Parse & Map Fields').item.json['Manglik'] }}",
+            "Lucky Day": "={{ $('Parse & Map Fields').item.json['Lucky Day'] }}",
+            "Lucky Color": "={{ $('Parse & Map Fields').item.json['Lucky Color'] }}",
+            "Lucky Stone": "={{ $('Parse & Map Fields').item.json['Lucky Stone'] }}",
+            "Lucky Number": "={{ $('Parse & Map Fields').item.json['Lucky Number'] }}",
+            "Life Stone": "={{ $('Parse & Map Fields').item.json['Life Stone'] }}",
+            "Benefic Stone": "={{ $('Parse & Map Fields').item.json['Benefic Stone'] }}",
+            "Planetary Positions": "={{ $('Parse & Map Fields').item.json['Planetary Positions'] }}",
+            "Yogas Doshas": "={{ $('Parse & Map Fields').item.json['Yogas Doshas'] }}",
+            "Sadesati Details": "={{ $('Parse & Map Fields').item.json['Sadesati Details'] }}",
+            "Balance of Dasha At Birth": "={{ $('Parse & Map Fields').item.json['Balance of Dasha At Birth'] }}",
+            "Current Mahadasha": "={{ $('Parse & Map Fields').item.json['Current Mahadasha'] }}",
+            "Current Antardasha": "={{ $('Parse & Map Fields').item.json['Current Antardasha'] }}",
+            "Next Mahadasha": "={{ $('Parse & Map Fields').item.json['Next Mahadasha'] }}",
+            "Vimshottari Dasha Timeline": "={{ $('Parse & Map Fields').item.json['Vimshottari Dasha Timeline'] }}",
+            "Current Dasha Prediction": "={{ $('Parse & Map Fields').item.json['Current Dasha Prediction'] }}",
+            "Annual Prediction": "={{ $('Parse & Map Fields').item.json['Annual Prediction'] }}",
+            "Personality Analysis": "={{ $('Parse & Map Fields').item.json['Personality Analysis'] }}",
+            "Career Prediction": "={{ $('Parse & Map Fields').item.json['Career Prediction'] }}",
+            "Health Notes": "={{ $('Parse & Map Fields').item.json['Health Notes'] }}",
+            "Marriage Notes": "={{ $('Parse & Map Fields').item.json['Marriage Notes'] }}",
+            "Lalkitab Remedies": "={{ $('Parse & Map Fields').item.json['Lalkitab Remedies'] }}",
+            "Ancestral Debts": "={{ $('Parse & Map Fields').item.json['Ancestral Debts'] }}",
+            "kundli_json": "={{ $('Parse & Map Fields').item.json.kundli_json }}",
+            "Bot Active": true,
+            "Total Sessions": 0
+          },
+          "matchingColumns": [
+            "WhatsApp Number"
+          ],
+          "schema": [
+            {
+              "id": "WhatsApp Number",
+              "displayName": "WhatsApp Number",
+              "required": true,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "Client Name",
+              "displayName": "Client Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "Bot Active",
+              "displayName": "Bot Active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false
+            }
+          ]
+        },
+        "options": {
+          "typecast": true
+        }
+      },
+      "id": "61c01a84-9d80-4975-bc2c-86cd5871af17",
+      "name": "Airtable — Upsert Client",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "from": "+14155238886",
+        "to": "={{ $('Parse & Map Fields').item.json.whatsappNum }}",
+        "toWhatsapp": true,
+        "message": "=Namaste {{ $('Parse & Map Fields').item.json.clientName }}! 🙏\n\nYour Vedic birth chart is ready.\n\nYou can now ask me anything — career, relationships, health, finance, or what the stars hold for you today.\n\nJust send your question here and I'll read your chart to answer.\n\n*SimpleJyotish AI* 🌟",
+        "options": {}
+      },
+      "id": "node-twilio-welcome",
+      "name": "Twilio — Welcome Client",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "twilioApi": {
+          "id": "xtqc7qZW6PcGAAbS",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://airtable.com/app8rIssogn1xAjJK/tblKpuWqZ4PSSKLe6"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "tblKpuWqZ4PSSKLe6",
+          "cachedResultName": "Clients"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "WhatsApp Number": "={{ $('Parse & Map Fields').item.json.whatsappNum }}",
+            "Client Name": "={{ $('Parse & Map Fields').item.json.clientName + ' — ⚠️ PARSE ERROR' }}",
+            "kundli_json": "={{ $('Parse & Map Fields').item.json.rawResponse }}",
+            "Consultation Notes": "⚠️ Claude returned invalid JSON. Raw response stored in kundli_json. Please re-run ingestion.",
+            "Bot Active": false
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "WhatsApp Number",
+              "displayName": "WhatsApp Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "Client Name",
+              "displayName": "Client Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "kundli_json",
+              "displayName": "kundli_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3b82930e-81e8-46e4-a20d-643944510c41",
+      "name": "Airtable — Log Error",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        192
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Extract PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Claude — Parse Chart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude — Parse Chart": {
+      "main": [
+        [
+          {
+            "node": "Parse & Map Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Map Fields": {
+      "main": [
+        [
+          {
+            "node": "Parsed OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsed OK?": {
+      "main": [
+        [
+          {
+            "node": "Airtable — Upsert Client",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Airtable — Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable — Upsert Client": {
+      "main": [
+        [
+          {
+            "node": "Twilio — Welcome Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form — Upload Chart": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "1ae17cdd-a1cc-4758-9d2c-e71cdd2113f0",
+  "meta": {
+    "instanceId": "158dea33ca06a40cb0041a65b6b8ecdd967b87d9ff5e2f84bbc5dbcf50a7d82f"
+  },
+  "id": "aWjqBt8fk2Et4uIr",
+  "tags": [
+    {
+      "updatedAt": "2026-05-27T16:57:53.096Z",
+      "createdAt": "2026-05-27T16:57:53.096Z",
+      "id": "mV41PyVQN46WiVAo",
+      "name": "Final"
+    }
+  ]
+}

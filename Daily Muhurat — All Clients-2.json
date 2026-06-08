@@ -1,0 +1,257 @@
+{
+  "name": "Daily Muhurat — All Clients",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 1 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a8366676-5156-4562-b192-dc48bd20d94d",
+      "name": "Daily 7AM IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1024,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://airtable.com/app8rIssogn1xAjJK/tblKpuWqZ4PSSKLe6/viw3edbtUur56kH6G"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "tblKpuWqZ4PSSKLe6",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/app8rIssogn1xAjJK/tblKpuWqZ4PSSKLe6"
+        },
+        "filterByFormula": "AND({WhatsApp Number} != '', {Bot Active} = 1)",
+        "options": {}
+      },
+      "id": "88281c2b-5bbb-4a06-8299-738c2bd3d5a1",
+      "name": "Airtable: Get All Active Clients",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -800,
+        96
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const client = $input.item.json;\nconst fields = client.fields || {};\n\nconst clientName  = fields['Client Name'] || 'Client';\nconst whatsappNum = fields['WhatsApp Number'] || '';\nconst kundliRaw   = fields['kundli_json'] || '';\n\nlet kundli = {};\ntry {\n  kundli = typeof kundliRaw === 'string' ? JSON.parse(kundliRaw) : (kundliRaw || {});\n} catch(e) {\n  kundli = {};\n}\n\nconst rashi      = fields['Rashi']             || kundli?.personal_info?.moon_sign              || 'Unknown';\nconst nakshatra  = fields['Nakshatra']         || kundli?.personal_info?.nakshatra              || 'Unknown';\nconst lagna      = fields['Lagna']             || kundli?.personal_info?.ascendant              || 'Unknown';\nconst mahadasha  = fields['Current Mahadasha'] || kundli?.dasha_periods?.current_mahadasha?.planet  || 'Unknown';\nconst antardasha = fields['Current Antardasha']|| kundli?.dasha_periods?.current_antardasha?.planet || 'Unknown';\nconst luckyColor  = fields['Lucky Color']  || '';\nconst luckyNumber = fields['Lucky Number'] || '';\n\n// Detect timezone from WhatsApp number\nconst whatsNum = String(fields['WhatsApp Number'] || '');\nlet clientTZ = 'Asia/Kolkata';\nif (whatsNum.startsWith('+1'))       clientTZ = 'America/Toronto';\nelse if (whatsNum.startsWith('+44'))  clientTZ = 'Europe/London';\nelse if (whatsNum.startsWith('+61'))  clientTZ = 'Australia/Sydney';\nelse if (whatsNum.startsWith('+971')) clientTZ = 'Asia/Dubai';\nelse if (whatsNum.startsWith('+65'))  clientTZ = 'Asia/Singapore';\nconst today = $now.setZone(clientTZ).toFormat('cccc, MMMM dd, yyyy');\n\nconst prompt = `You are a senior Vedic Jyotishi writing a private daily note to your client. \nSpeak as a real astrologer — authoritative, warm, precise. No apps, no bots, no templates.\n\nCLIENT: ${clientName}\nTODAY: ${today}\n\nCHART DETAILS:\n- Lagna: ${lagna}\n- Rashi: ${rashi}\n- Nakshatra: ${nakshatra}\n- Running Dasha: ${mahadasha} / ${antardasha}\n- Lucky Colour: ${luckyColor}\n- Lucky Number: ${luckyNumber}\n\nFULL KUNDLI:\n${kundliRaw ? JSON.stringify(kundli, null, 2).slice(0, 3000) : 'Not available'}\n\nWrite today's muhurat guidance as plain WhatsApp text. Structure:\n\nLine 1: \"Pranam ${clientName},\" \nLine 2: One sentence on today's planetary energy specific to their chart — name the exact nakshatra lord or dasha planet at work.\nAuspicious window: State the best 2-hour window today and why (cite nakshatra or transit).\nGood for: Two or three activities favoured by today's energy, grounded in their chart.\nCaution: One thing to avoid and the astrological reason.\nLucky: Colour and number for today.\nRemedy: One simple, specific act tied to the dasha planet lord. Classical remedy — not generic.\nClose with: \"Jai Shri Ganesh.\"\n\nRULES:\n- No emoji. No bullet points. No headings. No asterisks.\n- Write in flowing sentences, the way a Jyotishi dictates to a client.\n- Cite specific chart factors — nakshatra pada, dasha lord, rashi.\n- Under 130 words total.\n- Sound like a person, not an app.`;\n\nreturn {\n  json: {\n    prompt,\n    clientName,\n    whatsappNumber: whatsappNum,\n    recordId: client.id\n  }\n};"
+      },
+      "id": "ad52864d-40d5-46cd-a1e8-c0895a08798f",
+      "name": "Build Muhurat Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-haiku-4-5-20251001",
+          "mode": "list",
+          "cachedResultName": "claude-haiku-4-5-20251001"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9599f3ce-62fd-4e69-b564-480df286699e",
+      "name": "Claude: Generate Muhurat",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        96
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "8PLi6GsFVY1jh25u",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "from": "+14155238886",
+        "to": "={{ $('Build Muhurat Context').item.json.whatsappNumber }}",
+        "toWhatsapp": true,
+        "message": "={{ $json.content[0].text }}",
+        "options": {}
+      },
+      "id": "09a89721-edf4-4319-b24e-ee049f524e32",
+      "name": "Twilio: Send Daily Muhurat",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "twilioApi": {
+          "id": "xtqc7qZW6PcGAAbS",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://airtable.com/app8rIssogn1xAjJK/tblKpuWqZ4PSSKLe6/viw3edbtUur56kH6G"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "tblKpuWqZ4PSSKLe6",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/app8rIssogn1xAjJK/tblKpuWqZ4PSSKLe6"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Build Muhurat Context').item.json.recordId }}",
+            "Last Consulted": "={{ $now.toISODate() }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "Last Consulted",
+              "displayName": "Last Consulted",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ]
+        },
+        "options": {
+          "typecast": true
+        }
+      },
+      "id": "231d0ff0-7314-4db4-a806-f57423195814",
+      "name": "Airtable: Log Muhurat Send",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        192
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily 7AM IST": {
+      "main": [
+        [
+          {
+            "node": "Airtable: Get All Active Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable: Get All Active Clients": {
+      "main": [
+        [
+          {
+            "node": "Build Muhurat Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Muhurat Context": {
+      "main": [
+        [
+          {
+            "node": "Claude: Generate Muhurat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Generate Muhurat": {
+      "main": [
+        [
+          {
+            "node": "Twilio: Send Daily Muhurat",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Airtable: Log Muhurat Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "19abdcb4-176d-44d4-824a-47f24d600ad1",
+  "meta": {
+    "instanceId": "158dea33ca06a40cb0041a65b6b8ecdd967b87d9ff5e2f84bbc5dbcf50a7d82f"
+  },
+  "id": "jEMKc3UHrmxaFqvt",
+  "tags": []
+}

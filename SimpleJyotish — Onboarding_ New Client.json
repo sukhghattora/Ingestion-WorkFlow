@@ -1,0 +1,272 @@
+{
+  "name": "SimpleJyotish — Onboarding: New Client",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onboarding-new-client",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "20c23db8-92bc-4dc3-a0da-a9523ab03aa3",
+      "name": "Razorpay Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        80
+      ],
+      "webhookId": "onboarding-new-client"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Verify Razorpay webhook signature + extract birth details ──\n// SECURITY: confirms this request truly came from Razorpay, not a spoofer.\nconst crypto = require('crypto');\n\nconst secret = $env.RAZORPAY_WEBHOOK_SECRET;\nconst signature = $input.item.json.headers['x-razorpay-signature'];\n\n// n8n gives the raw body as a string when rawBody=true\nconst rawBody = $input.item.json.body;\nconst bodyString = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);\n\nif (secret && signature) {\n  const expected = crypto.createHmac('sha256', secret).update(bodyString).digest('hex');\n  if (expected !== signature) {\n    throw new Error('Invalid Razorpay webhook signature — request rejected.');\n  }\n}\n\n// Parse the verified body\nconst body = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;\nconst eventType = body.event || '';\nconst payment = body?.payload?.payment?.entity || {};\nconst notes = payment.notes || {};\n\n// Birth details are collected as custom fields on the Razorpay Payment Page.\n// They arrive inside payment.notes. Adjust the keys below to match the exact\n// field names you set up on your Razorpay Payment Page.\nreturn [{\n  json: {\n    eventType,\n    paymentId: payment.id || '',\n    amount: payment.amount ? payment.amount / 100 : 0,   // paise -> rupees\n    currency: payment.currency || 'INR',\n    email: payment.email || '',\n    contact: payment.contact || '',\n    // ── Birth details from the form ──\n    fullName: notes.full_name || notes.name || '',\n    dob: notes.dob || notes.date_of_birth || '',\n    tob: notes.tob || notes.time_of_birth || '',\n    pob: notes.pob || notes.place_of_birth || '',\n    whatsapp: (notes.whatsapp || notes.whatsapp_number || payment.contact || '').replace(/\\s+/g, ''),\n    gender: notes.gender || '',\n    tier: notes.tier || 'Core'\n  }\n}];"
+      },
+      "id": "8f29b479-b425-40a0-ad63-f3d5ed3cee4d",
+      "name": "Verify & Extract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-captured",
+              "leftValue": "={{ $json.eventType }}",
+              "rightValue": "payment.captured",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f975322c-c05f-493f-afcb-bc6e9da9a603",
+      "name": "Payment Captured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "https://airtable.com/app8rIssogn1xAjJK/",
+          "mode": "url"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Clients",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Client Name": "={{ $json.fullName }}",
+            "Gender": "={{ $json.gender }}",
+            "Date of Birth": "={{ $json.dob }}",
+            "Time of Birth": "={{ $json.tob }}",
+            "Place of Birth": "={{ $json.pob }}",
+            "WhatsApp Number": "={{ $json.whatsapp }}",
+            "Email": "={{ $json.email }}",
+            "Subscription Tier": "={{ $json.tier }}",
+            "Payment ID": "={{ $json.paymentId }}",
+            "Amount Paid": "={{ $json.amount }}",
+            "Status": "Awaiting Chart",
+            "Bot Active": "false",
+            "Onboarded On": "={{ new Date().toISOString().split('T')[0] }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "cd3107bb-fcd7-41d3-a878-6d084953eb51",
+      "name": "Create Client Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.ASTROLOGER_TELEGRAM_ID }}",
+        "text": "=🔔 NEW CLIENT — build chart\n\n👤 {{ $('Verify & Extract').item.json.fullName }}\n⚧ {{ $('Verify & Extract').item.json.gender }}\n📅 DOB: {{ $('Verify & Extract').item.json.dob }}\n🕐 Time: {{ $('Verify & Extract').item.json.tob }}\n📍 Place: {{ $('Verify & Extract').item.json.pob }}\n📱 WhatsApp: {{ $('Verify & Extract').item.json.whatsapp }}\n💳 Tier: {{ $('Verify & Extract').item.json.tier }} — ₹{{ $('Verify & Extract').item.json.amount }}\n\n👉 Build kundli on Horosoft, verify on JHora, drop PDF in the /charts Drive folder.",
+        "additionalFields": {}
+      },
+      "id": "3b8f0dfd-c65b-4890-99df-5c793df94ae9",
+      "name": "Notify Astrologer",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ],
+      "webhookId": "76bbf93e-b0eb-4f5a-a8b6-a8f1ebbf1c7d"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "options": {}
+      },
+      "id": "e99e81bc-79b3-432f-8253-b80c1032e3fe",
+      "name": "Confirm to Client",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ok\", \"received\": true } }}",
+        "options": {}
+      },
+      "id": "7315524d-99a4-46ab-9833-d44105f646a5",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ignored\", \"reason\": \"not a payment.captured event\" } }}",
+        "options": {}
+      },
+      "id": "29a053a3-0209-48a3-96d5-0306112dfe18",
+      "name": "Respond — Ignored",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        352
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Razorpay Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify & Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify & Extract": {
+      "main": [
+        [
+          {
+            "node": "Payment Captured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payment Captured?": {
+      "main": [
+        [
+          {
+            "node": "Create Client Record",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Confirm to Client",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond — Ignored",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Client Record": {
+      "main": [
+        [
+          {
+            "node": "Notify Astrologer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm to Client": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "75687576-2275-4a1f-ae29-ed96200b9bca",
+  "meta": {
+    "instanceId": "158dea33ca06a40cb0041a65b6b8ecdd967b87d9ff5e2f84bbc5dbcf50a7d82f"
+  },
+  "id": "9BINWKYPqEnC1A7X",
+  "tags": [
+    {
+      "updatedAt": "2026-05-29T03:39:06.800Z",
+      "createdAt": "2026-05-29T03:39:06.800Z",
+      "id": "Pnjs52WApyoA9sU9",
+      "name": "Onboarding"
+    },
+    {
+      "updatedAt": "2026-05-29T03:39:06.797Z",
+      "createdAt": "2026-05-29T03:39:06.797Z",
+      "id": "sHO3i93ahNBwef5k",
+      "name": "Jyotish Bot"
+    }
+  ]
+}

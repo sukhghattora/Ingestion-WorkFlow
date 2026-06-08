@@ -1,0 +1,381 @@
+{
+  "name": "Whatsapp Astrologer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-astrologer",
+        "options": {}
+      },
+      "id": "9eb314c7-fbf1-48ab-a936-a96814135ffc",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -448,
+        96
+      ],
+      "webhookId": "3d0f3184-a6b1-4240-8c2c-61b788f6bd0a"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "user-id",
+              "name": "userId",
+              "value": "={{ $json.body.From.replace('whatsapp:', '') }}",
+              "type": "string"
+            },
+            {
+              "id": "user-name",
+              "name": "userName",
+              "value": "={{ $json.body.ProfileName || 'User' }}",
+              "type": "string"
+            },
+            {
+              "id": "message-text",
+              "name": "messageText",
+              "value": "={{ $json.body.Body }}",
+              "type": "string"
+            },
+            {
+              "id": "chat-id",
+              "name": "chatId",
+              "value": "={{ $json.body.From.replace('whatsapp:', '') }}",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ad287fc0-84b3-4f3c-9a57-9d83642f4a0f",
+      "name": "Extract Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://airtable.com/app8rIssogn1xAjJK/tbl9VfhbsJ4d8oHqZ/viw3edbtUur56kH6G"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "tblKpuWqZ4PSSKLe6",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/app8rIssogn1xAjJK/tblKpuWqZ4PSSKLe6"
+        },
+        "filterByFormula": "={WhatsApp Number} = '{{ $('Extract Variables').item.json.userId }}'",
+        "options": {}
+      },
+      "id": "2e212bce-b8dc-4d06-a724-2751570645ec",
+      "name": "Airtable: Find Client Chart",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "c0cd96eb-e848-4e07-a5f3-cb4265293c1e",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://airtable.com/app8rIssogn1xAjJK/tbl9VfhbsJ4d8oHqZ/viw3edbtUur56kH6G"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "tbl9VfhbsJ4d8oHqZ",
+          "cachedResultName": "users",
+          "cachedResultUrl": "https://airtable.com/app8rIssogn1xAjJK/tbl9VfhbsJ4d8oHqZ"
+        },
+        "filterByFormula": "={WhatsApp Number} = '{{ $('Extract Variables').item.json.userId }}'",
+        "options": {}
+      },
+      "id": "d8628f02-91df-4bc2-872e-407755867efe",
+      "name": "Airtable: Get Chat History",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const chartData = $('Airtable: Find Client Chart').first()?.json ?? {};\nconst chatHistory = $('Airtable: Get Chat History')?.all?.() ?? [];\nconst msg = $('Extract Variables').first().json;\nconst fields = chartData.fields || chartData || {};\nconst clientName = fields['Client Name'] || '';\n\nif (!clientName) {\n  return [{ json: {\n    clientNotFound: true,\n    chatId: msg.chatId,\n    userId: msg.userId,\n    systemPrompt: 'You are a WhatsApp assistant for a Vedic astrology service.',\n    userMessage: 'This user is NOT registered. Respond warmly saying you could not find their profile and they should contact their astrologer to register. Under 40 words.',\n    recordId: null,\n    messageText: msg.messageText\n  }}];\n}\n\n// Vimshottari Dasha Calculator\nconst DASHA_SEQ = ['Ketu','Venus','Sun','Moon','Mars','Rahu','Jupiter','Saturn','Mercury'];\nconst DASHA_YEARS = {Ketu:7,Venus:20,Sun:6,Moon:10,Mars:7,Rahu:18,Jupiter:16,Saturn:19,Mercury:17};\nconst MS_DAY = 86400000, DAYS_YR = 365.25;\n\nfunction parseDate(s) {\n  if (!s) return null; s = String(s).trim();\n  let m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);\n  if (m) return new Date(+m[3], +m[2]-1, +m[1]);\n  m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);\n  if (m) return new Date(+m[1], +m[2]-1, +m[3]);\n  const d = new Date(s); return isNaN(d.getTime()) ? null : d;\n}\nfunction parseBalance(s) {\n  if (!s) return null; s = String(s).trim();\n  const pm = s.match(/^(Ketu|Venus|Sun|Moon|Mars|Rahu|Jupiter|Saturn|Mercury)\\b/i);\n  if (!pm) return null;\n  const planet = DASHA_SEQ.find(p => p.toLowerCase() === pm[1].toLowerCase());\n  if (!planet) return null;\n  const y = s.match(/(\\d+)\\s*(?:Y(?:ear)?s?|yr)/i);\n  const mo = s.match(/(\\d+)\\s*(?:M(?:onth)?s?|mo)\\b/i);\n  const d = s.match(/(\\d+)\\s*(?:D(?:ay)?s?)\\b/i);\n  if (!y && !mo && !d) return null;\n  return { planet, years: y ? +y[1] : 0, months: mo ? +mo[1] : 0, days: d ? +d[1] : 0 };\n}\nfunction addPeriod(dt, y, m, d) { const r = new Date(dt); r.setFullYear(r.getFullYear()+y); r.setMonth(r.getMonth()+m); r.setDate(r.getDate()+d); return r; }\nfunction addYrsF(dt, y) { return new Date(dt.getTime() + y * DAYS_YR * MS_DAY); }\nfunction fmtD(d) { return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear(); }\n\nfunction calcDasha(dobStr, balStr) {\n  const dob = parseDate(dobStr), bal = parseBalance(balStr);\n  if (!dob || !bal) return { error: 'Cannot parse DOB or balance' };\n  const si = DASHA_SEQ.indexOf(bal.planet);\n  const firstEnd = addPeriod(dob, bal.years, bal.months, bal.days);\n  const firstStart = addYrsF(firstEnd, -DASHA_YEARS[bal.planet]);\n  const tl = [{ planet: bal.planet, start: firstStart, end: firstEnd, displayStart: dob, partial: true }];\n  const cutoff = new Date(dob.getFullYear() + 130, 0, 1);\n  let cursor = firstEnd, idx = (si + 1) % 9;\n  while (cursor < cutoff) { const p = DASHA_SEQ[idx], end = addYrsF(cursor, DASHA_YEARS[p]); tl.push({ planet: p, start: cursor, end, partial: false }); cursor = end; idx = (idx+1)%9; }\n  const today = new Date();\n  let curMD = null, nextMD = null;\n  for (let i = 0; i < tl.length; i++) { if (tl[i].start <= today && today < tl[i].end) { curMD = tl[i]; nextMD = tl[i+1]||null; break; } }\n  if (!curMD) return { error: 'Today outside dasha cycle' };\n  const adSi = DASHA_SEQ.indexOf(curMD.planet);\n  let adCursor = curMD.start, curAD = null;\n  for (let i = 0; i < 9; i++) {\n    const adP = DASHA_SEQ[(adSi+i)%9], dur = (DASHA_YEARS[curMD.planet]*DASHA_YEARS[adP]/120)*DAYS_YR;\n    const end = new Date(adCursor.getTime() + dur * MS_DAY);\n    if (adCursor <= today && today < end) { curAD = { planet: adP, start: adCursor, end }; break; }\n    adCursor = end;\n  }\n  const daysLeft = curAD ? Math.ceil((curAD.end - today) / MS_DAY) : null;\n  const mdDs = curMD.partial ? curMD.displayStart : curMD.start;\n  return {\n    mahadasha:     curMD.planet + ' Mahadasha (' + fmtD(mdDs) + ' - ' + fmtD(curMD.end) + ')',\n    antardasha:    curAD ? curMD.planet + '-' + curAD.planet + ' Antardasha (' + fmtD(curAD.start) + ' - ' + fmtD(curAD.end) + ')' : 'NOT AVAILABLE',\n    daysLeft, nextMahadasha: nextMD ? nextMD.planet + ' starts ' + fmtD(nextMD.start) : '', source: 'calculated'\n  };\n}\n\nconst dc = calcDasha(String(fields['Date of Birth']||''), String(fields['Balance of Dasha At Birth']||''));\n// Sanity check: if calculated Mahadasha planet ≠ stored Airtable value, use Airtable\nfunction extractPlanet(val) {\n  if (!val) return '';\n  const m = String(val).match(/^(Ketu|Venus|Sun|Moon|Mars|Rahu|Jupiter|Saturn|Mercury)\\b/i);\n  return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '';\n}\nconst storedMDPlanet = extractPlanet(fields['Current Mahadasha'] || '');\nconst calcMDPlanet   = dc.error ? '' : dc.mahadasha.split(' ')[0];\nconst useFallback    = !dc.error && storedMDPlanet && calcMDPlanet && storedMDPlanet !== calcMDPlanet;\nif (useFallback) console.log('[DashaCalc] Sanity mismatch: calc=' + calcMDPlanet + ' stored=' + storedMDPlanet + ' — using Airtable values');\n\nconst currentMD   = (dc.error || useFallback) ? (fields['Current Mahadasha']  || 'NOT AVAILABLE') : dc.mahadasha;\nconst currentAD   = (dc.error || useFallback) ? (fields['Current Antardasha'] || 'NOT AVAILABLE') : dc.antardasha;\nconst nextMD      = (dc.error || useFallback) ? (fields['Next Mahadasha']     || '')               : dc.nextMahadasha;\nconst daysLeft    = (dc.error || useFallback) ? null : (dc.daysLeft || null);\nconst dashaSource = dc.error ? 'airtable (parse error)' : useFallback ? 'airtable (sanity check)' : 'calculated';\n\nlet conversationHistory = '';\nconst validHistory = chatHistory.filter(r => r.json && r.json.fields && r.json.fields.user_message);\nif (validHistory.length > 0) {\n  const sorted = [...validHistory].sort((a,b) => new Date(a.json.fields.timestamp||0) - new Date(b.json.fields.timestamp||0));\n  conversationHistory = sorted.slice(-5).map(r => 'Client: ' + (r.json.fields.user_message||'') + '\\nJyotishi: ' + (r.json.fields.ai_response||'')).join('\\n\\n');\n}\n\nconst f = (k) => fields[k] || '';\nconst dashaStatus = currentMD === 'NOT AVAILABLE'\n  ? 'DASHA DATA NOT AVAILABLE - do not guess dasha periods'\n  : 'Mahadasha: ' + currentMD + '\\nAntardasha: ' + currentAD + (daysLeft ? ' (' + daysLeft + ' days remaining)' : '') + '\\nNext: ' + nextMD;\n\n// Detect timezone from WhatsApp number country code\nconst whatsNum = String(fields['WhatsApp Number'] || msg.chatId || '');\nlet clientTZ = 'Asia/Kolkata'; // default IST\nif (whatsNum.startsWith('+1'))       clientTZ = 'America/Toronto';\nelse if (whatsNum.startsWith('+44'))  clientTZ = 'Europe/London';\nelse if (whatsNum.startsWith('+61'))  clientTZ = 'Australia/Sydney';\nelse if (whatsNum.startsWith('+971')) clientTZ = 'Asia/Dubai';\nelse if (whatsNum.startsWith('+65'))  clientTZ = 'Asia/Singapore';\nelse if (whatsNum.startsWith('+91'))  clientTZ = 'Asia/Kolkata';\nconst today = new Date(new Date().toLocaleString('en-US', { timeZone: clientTZ }));\nconst dateStr = today.toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone: clientTZ });\nconsole.log('[AssembleCtx] Client TZ: ' + clientTZ + ' (' + whatsNum.slice(0,3) + ') → ' + dateStr);\n\nconst systemPrompt =\n  'You are Veteran Jyotishi - a warm, precise Vedic astrologer trained in classical Parashari Jyotish, KP, Nadi Astrology, Vimshottari Dasha, nakshatra-pada analysis, and Shodashvarga divisional charts.\\n\\n' +\n  'Today: ' + dateStr + '\\n\\n' +\n  'HARD RULES:\\n' +\n  '- NEVER ask for birth details. The complete chart data is provided.\\n' +\n  '- NEVER give generic readings. Cite SPECIFIC planetary factors from the chart data.\\n' +\n  '- Address the client as ' + clientName + '. Be warm, confident, direct.\\n' +\n  '- Under 160 words total.\\n' +\n  '- The FINAL LINE must be exactly: Ask us the remedy for this\\n\\n' +\n  'DASHA RULES (source: ' + dashaSource + '):\\n' +\n  '- Use ONLY the dasha data provided. Do NOT calculate dasha yourself.\\n' +\n  '- If dasha says NOT AVAILABLE, write: I need to review your exact Dasha timeline - please ask your Astrologer.\\n' +\n  '- Quote dasha lord and dates exactly as shown.\\n\\n' +\n  'OUTPUT FORMAT (WhatsApp plain text):\\n' +\n  'Line 1: ' + clientName + ', ... - one sentence naming the exact astrological factor.\\n' +\n  'Body: 2-4 sentences citing specific chart factors (planet, house, nakshatra, dasha lord).\\n' +\n  'Final line (standalone): Ask us the remedy for this\\n' +\n  'No headings, no bullet lists, no emoji unless client used one. *Asterisks* for 1-2 key terms only.';\n\nconst userMessage =\n  '======================================\\n' +\n  'CHART DATA - ' + clientName.toUpperCase() + '\\n' +\n  '======================================\\n' +\n  'Lagna: ' + f('Lagna') + ' | Lagna Lord: ' + f('Lagna Lord') + '\\n' +\n  'Rashi: ' + f('Rashi') + ' | Nakshatra: ' + f('Nakshatra') + ' Pada ' + f('Nakshatra Pada') + '\\n' +\n  'Gan: ' + f('Gan') + ' | Paya: ' + f('Paya') + ' | Manglik: ' + f('Manglik') + '\\n\\n' +\n  'PLANETARY POSITIONS:\\n' + (f('Planetary Positions') || 'Not available') + '\\n\\n' +\n  'VIMSHOTTARI DASHA:\\n' + dashaStatus + '\\n' +\n  'Dasha Prediction: ' + (f('Current Dasha Prediction') || 'Not recorded') + '\\n\\n' +\n  'YOGAS & DOSHAS:\\n' + (f('Yogas Doshas') || 'Not recorded') + '\\n\\n' +\n  'SADESATI: ' + (f('Sadesati Details') || 'Not applicable') + '\\n\\n' +\n  'LUCKY FACTORS: Day: ' + f('Lucky Day') + ' | Color: ' + f('Lucky Color') + ' | Number: ' + f('Lucky Number') + ' | Stone: ' + f('Life Stone') + '\\n\\n' +\n  'LAL KITAB REMEDIES:\\n' + (f('Lalkitab Remedies') || 'Not recorded') + '\\n' +\n  '======================================\\n\\n' +\n  (conversationHistory ? 'RECENT CONVERSATION (do not repeat):\\n' + conversationHistory + '\\n\\n' : '') +\n  'CLIENT QUESTION: ' + msg.messageText;\n\nreturn [{ json: {\n  systemPrompt, userMessage,\n  clientNotFound: false,\n  userId: msg.userId, userName: msg.userName, messageText: msg.messageText,\n  chatId: msg.chatId, clientName, recordId: chartData.id || null, dashaSource\n}}];"
+      },
+      "id": "8c229714-1c22-4f8b-a1ff-a2643f52184a",
+      "name": "Function: Build Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-6",
+          "mode": "list",
+          "cachedResultName": "claude-sonnet-4-6"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.userMessage }}"
+            }
+          ]
+        },
+        "options": {
+          "system": "={{ $json.systemPrompt }}",
+          "maxTokens": 1024
+        }
+      },
+      "id": "e1aead8f-535c-4d84-9662-f07fce18f5ee",
+      "name": "Message a model",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        672,
+        96
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "8PLi6GsFVY1jh25u",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "from": "=+14155238886",
+        "to": "={{ $('Extract Variables').item.json.chatId }}",
+        "toWhatsapp": true,
+        "message": "={{ $('Message a model').item.json.content[0].text }}",
+        "options": {}
+      },
+      "id": "de422e33-b83d-413c-87a3-33f22e4e8acd",
+      "name": "Twilio: Send WhatsApp",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        0
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": false,
+      "credentials": {
+        "twilioApi": {
+          "id": "xtqc7qZW6PcGAAbS",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://airtable.com/app8rIssogn1xAjJK/tbl9VfhbsJ4d8oHqZ/viw3edbtUur56kH6G?blocks=hide"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "tbl9VfhbsJ4d8oHqZ",
+          "cachedResultName": "users",
+          "cachedResultUrl": "https://airtable.com/app8rIssogn1xAjJK/tbl9VfhbsJ4d8oHqZ"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_message": "={{ $('Extract Variables').item.json.messageText }}",
+            "ai_response": "={{ $('Message a model').item.json.content[0].text }}",
+            "sessionid": "={{ $('Extract Variables').item.json.userId }}_{{ $today.toISODate() }}",
+            "WhatsApp Number": "={{ $('Extract Variables').item.json.userId }}",
+            "timestamp": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {
+          "typecast": true
+        }
+      },
+      "id": "393f7764-fc6e-4545-9302-b208c14d8a15",
+      "name": "Airtable: Save Conversation",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        1024,
+        192
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "39WbT7JEgqnpielD",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Variables": {
+      "main": [
+        [
+          {
+            "node": "Airtable: Find Client Chart",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Airtable: Get Chat History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable: Find Client Chart": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Function: Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable: Get Chat History": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Function: Build Context": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Twilio: Send WhatsApp",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Airtable: Save Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "b763c12c-0228-4c57-b805-5f32fd75fc05",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "158dea33ca06a40cb0041a65b6b8ecdd967b87d9ff5e2f84bbc5dbcf50a7d82f"
+  },
+  "id": "YDjjrlHnwLkqyQQP",
+  "tags": [
+    {
+      "updatedAt": "2026-05-27T16:58:33.867Z",
+      "createdAt": "2026-05-27T16:58:33.867Z",
+      "id": "yP8K3ynWPIqYNG4N",
+      "name": "Entry"
+    }
+  ]
+}
